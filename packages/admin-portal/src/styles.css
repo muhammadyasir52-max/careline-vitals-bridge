@@ -1,0 +1,149 @@
+:root {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: #f4f6f8;
+  color: #1b2733;
+}
+
+header {
+  background: #0f4c5c;
+  color: #fff;
+  padding: 1.5rem 2rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.subtitle {
+  margin: 0.25rem 0 0;
+  opacity: 0.8;
+  font-size: 0.95rem;
+}
+
+main {
+  max-width: 960px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #dde3e8;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 480px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  font-weight: 600;
+  gap: 0.25rem;
+}
+
+input, select {
+  font-size: 0.95rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #c9d2da;
+  border-radius: 4px;
+  font-weight: normal;
+}
+
+.adapter-fields {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #0f4c5c;
+  background: #f0f5f6;
+}
+
+button {
+  align-self: start;
+  background: #0f4c5c;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #0c3c48;
+}
+
+#tenant-result {
+  background: #0b1f27;
+  color: #b9f6ca;
+  padding: 0.75rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  min-height: 1.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #e3e8ec;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.stat-card {
+  background: #f0f5f6;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.stat-card .value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.stat-card .label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #5b6b78;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: #0f4c5c;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.9rem;
+}

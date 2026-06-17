@@ -1,0 +1,12 @@
+{
+  "name": "@careline/vitals-bridge-admin-portal",
+  "version": "0.1.0",
+  "description": "Static tenant onboarding and data-flow monitoring dashboard for the CareLine Vitals Bridge",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

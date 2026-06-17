@@ -1,0 +1,12 @@
+{
+  "name": "@careline/emr-sim",
+  "version": "0.1.0",
+  "description": "Lightweight OpenMRS/Bahmni-compatible FHIR R4 EMR simulator, used to demo the CareLine Vitals Bridge without a full OpenMRS install. Exposes the same /ws/fhir2/R4 REST surface so the FHIR adapter requires zero changes to point at a real OpenMRS/Bahmni instance later.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

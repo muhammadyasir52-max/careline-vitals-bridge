@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CareLine Vitals Bridge — Admin</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>CareLine Vitals Bridge</h1>
+    <p class="subtitle">Tenant onboarding &amp; data-flow monitoring</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Onboard a new hospital / clinic</h2>
+      <form id="tenant-form">
+        <label>
+          Tenant name
+          <input type="text" name="name" required placeholder="Riverside Hospital" />
+        </label>
+
+        <label>
+          EMR adapter type
+          <select name="adapterType" id="adapter-type" required>
+            <option value="fhir">FHIR R4</option>
+            <option value="hl7v2">HL7 v2 (MLLP)</option>
+            <option value="custom-rest">Custom REST</option>
+          </select>
+        </label>
+
+        <div id="fhir-fields" class="adapter-fields">
+          <label>FHIR base URL <input type="text" name="baseUrl" placeholder="http://emr.example.com/fhir" /></label>
+          <label>Auth header (optional) <input type="text" name="authHeader" placeholder="Bearer ..." /></label>
+        </div>
+
+        <div id="hl7v2-fields" class="adapter-fields" hidden>
+          <label>HL7 host <input type="text" name="host" placeholder="127.0.0.1" /></label>
+          <label>HL7 port <input type="number" name="port" placeholder="6661" /></label>
+          <label>Sending application <input type="text" name="sendingApplication" placeholder="VitalsPlatform" /></label>
+          <label>Sending facility <input type="text" name="sendingFacility" placeholder="VitalsPlatform" /></label>
+        </div>
+
+        <div id="custom-rest-fields" class="adapter-fields" hidden>
+          <label>Endpoint URL <input type="text" name="url" placeholder="https://emr.example.com/api/vitals" /></label>
+          <label>Auth header (optional) <input type="text" name="customAuthHeader" placeholder="Bearer ..." /></label>
+        </div>
+
+        <button type="submit">Create tenant</button>
+      </form>
+      <pre id="tenant-result"></pre>
+    </section>
+
+    <section class="panel">
+      <h2>Tenants</h2>
+      <button id="refresh-tenants">Refresh</button>
+      <table id="tenants-table">
+        <thead>
+          <tr><th>Name</th><th>Adapter</th><th>API Key</th><th>Dashboard</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Tenant dashboard</h2>
+      <div id="dashboard"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

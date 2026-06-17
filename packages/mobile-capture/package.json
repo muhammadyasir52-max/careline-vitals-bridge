@@ -1,0 +1,9 @@
+{
+  "name": "@careline/vitals-bridge-mobile-capture",
+  "version": "0.1.0",
+  "description": "Simulator for the device-capture mobile app (manual entry + simulated BLE readings) used during development before the real Expo app is built.",
+  "main": "simulate.js",
+  "scripts": {
+    "simulate": "node simulate.js"
+  }
+}

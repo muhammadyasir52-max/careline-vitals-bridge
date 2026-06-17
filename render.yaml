@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: careline-vitals-bridge-api
+    runtime: node
+    rootDir: packages/cloud-api
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3000
+    healthCheckPath: /health
+
+  - type: web
+    name: careline-vitals-bridge-admin
+    runtime: node
+    rootDir: packages/admin-portal
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ADMIN_PORTAL_PORT
+        value: 4000
+
+  - type: web
+    name: careline-emr-sim
+    runtime: node
+    rootDir: packages/emr-sim
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: EMR_SIM_PORT
+        value: 6010
