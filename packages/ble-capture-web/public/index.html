@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CareLine Vitals Bridge — BLE Capture</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- SETUP SCREEN -->
+  <div id="screen-setup" class="screen active">
+    <header>
+      <h1>CareLine Vitals Bridge</h1>
+      <p class="subtitle">BLE Device Capture</p>
+    </header>
+    <main>
+      <section class="panel">
+        <h2>Setup</h2>
+        <form id="setup-form">
+          <label>
+            Cloud API URL
+            <input type="url" name="apiBase" placeholder="https://your-api.onrender.com/api/v1"
+              value="http://localhost:3000/api/v1" required />
+          </label>
+          <label>
+            Tenant API Key
+            <input type="text" name="apiKey" placeholder="paste your tenant API key" required />
+          </label>
+          <label>
+            Patient ID
+            <input type="text" name="patientId" placeholder="e.g. patient-001" required />
+          </label>
+          <label>
+            Your name (CareManager / Operator)
+            <input type="text" name="recordedBy" placeholder="e.g. Nurse Fatima" />
+          </label>
+          <button type="submit">Start capturing vitals →</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- CAPTURE SCREEN -->
+  <div id="screen-capture" class="screen">
+    <header>
+      <h1>CareLine Vitals Bridge</h1>
+      <p class="subtitle" id="capture-subtitle">Patient: —</p>
+    </header>
+    <main>
+
+      <!-- THERMOMETER -->
+      <section class="panel device-panel" id="panel-temp">
+        <div class="panel-header">
+          <span class="icon">🌡️</span>
+          <h2>Body Temperature</h2>
+          <span class="status-dot" id="dot-temp"></span>
+        </div>
+        <div class="reading-display" id="display-temp">—</div>
+        <div class="actions">
+          <button class="btn-ble" onclick="connectDevice('temp')">Connect BLE device</button>
+          <button class="btn-manual" onclick="openManual('temp')">Enter manually</button>
+        </div>
+        <div class="manual-entry" id="manual-temp">
+          <input type="number" step="0.1" min="30" max="45" placeholder="e.g. 37.2" id="manual-val-temp" />
+          <select id="manual-unit-temp">
+            <option value="Cel">°C</option>
+            <option value="degF">°F</option>
+          </select>
+          <button onclick="saveManual('temp','body_temperature')">Save</button>
+        </div>
+      </section>
+
+      <!-- BLOOD PRESSURE -->
+      <section class="panel device-panel" id="panel-bp">
+        <div class="panel-header">
+          <span class="icon">🩺</span>
+          <h2>Blood Pressure</h2>
+          <span class="status-dot" id="dot-bp"></span>
+        </div>
+        <div class="reading-display" id="display-bp">—</div>
+        <div class="actions">
+          <button class="btn-ble" onclick="connectDevice('bp')">Connect BLE device</button>
+          <button class="btn-manual" onclick="openManual('bp')">Enter manually</button>
+        </div>
+        <div class="manual-entry" id="manual-bp">
+          <label style="font-size:0.8rem">Systolic
+            <input type="number" step="1" min="40" max="300" placeholder="120" id="manual-sys" />
+          </label>
+          <label style="font-size:0.8rem">Diastolic
+            <input type="number" step="1" min="20" max="200" placeholder="80" id="manual-dia" />
+          </label>
+          <label style="font-size:0.8rem">Pulse
+            <input type="number" step="1" min="20" max="300" placeholder="72" id="manual-pulse" />
+          </label>
+          <button onclick="saveManualBP()">Save</button>
+        </div>
+      </section>
+
+      <!-- PULSE OXIMETER -->
+      <section class="panel device-panel" id="panel-spo2">
+        <div class="panel-header">
+          <span class="icon">💉</span>
+          <h2>SpO2 / Pulse Oximeter</h2>
+          <span class="status-dot" id="dot-spo2"></span>
+        </div>
+        <div class="reading-display" id="display-spo2">—</div>
+        <div class="actions">
+          <button class="btn-ble" onclick="connectDevice('spo2')">Connect BLE device</button>
+          <button class="btn-manual" onclick="openManual('spo2')">Enter manually</button>
+        </div>
+        <div class="manual-entry" id="manual-spo2">
+          <label style="font-size:0.8rem">SpO2 %
+            <input type="number" step="1" min="50" max="100" placeholder="98" id="manual-val-spo2" />
+          </label>
+          <label style="font-size:0.8rem">Pulse /min
+            <input type="number" step="1" min="20" max="300" placeholder="72" id="manual-pulse-spo2" />
+          </label>
+          <button onclick="saveManualSpo2()">Save</button>
+        </div>
+      </section>
+
+      <!-- SEND BUTTON -->
+      <section class="panel send-panel">
+        <div id="readings-summary"></div>
+        <button class="btn-send" id="btn-send" disabled onclick="sendReadings()">
+          Send to EMR (0 readings)
+        </button>
+        <div id="send-result"></div>
+      </section>
+
+    </main>
+    <footer>
+      <button class="btn-link" onclick="showSetup()">← Change settings</button>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

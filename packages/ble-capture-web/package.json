@@ -1,0 +1,12 @@
+{
+  "name": "@careline/vitals-bridge-ble-capture-web",
+  "version": "0.1.0",
+  "description": "CareLine Vitals Bridge — browser-based BLE device capture app (Web Bluetooth API). Open in Chrome/Edge on Android or Windows to read from Bluetooth thermometers, BP monitors, and pulse oximeters.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
