@@ -109,7 +109,7 @@ function createApp() {
 
 if (require.main === module) {
   const app = createApp();
-  const port = process.env.EMR_SIM_PORT || 6010;
+  const port = process.env.PORT || process.env.EMR_SIM_PORT || 6010;
   app.listen(port, () => {
     console.log(`CareLine EMR Simulator (FHIR R4) listening on port ${port}`);
     console.log(`  FHIR base URL: http://localhost:${port}/ws/fhir2/R4`);

@@ -29,3 +29,13 @@ services:
     envVars:
       - key: EMR_SIM_PORT
         value: 6010
+
+  - type: web
+    name: careline-ble-capture
+    runtime: node
+    rootDir: packages/ble-capture-web
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BLE_CAPTURE_PORT
+        value: 7000
