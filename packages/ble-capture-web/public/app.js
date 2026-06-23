@@ -27,14 +27,24 @@ const GATT = {
   GENERIC_FFF0_SERVICE:          '0000fff0-0000-1000-8000-00805f9b34fb',
   GENERIC_FFF0_NOTIFY:           '0000fff1-0000-1000-8000-00805f9b34fb',
   GENERIC_FFF0_WRITE:            '0000fff2-0000-1000-8000-00805f9b34fb',
+
+  // Nordic UART Service (NUS) - a widely reused standard "serial over BLE"
+  // service from Nordic Semiconductor's SDK examples. Confirmed used by the
+  // PC-60FW pulse oximeter (Viatom/Creative Medical).
+  NUS_SERVICE:                   '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+  NUS_RX_WRITE:                  '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+  NUS_TX_NOTIFY:                 '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
 };
 
 // All service UUIDs we might want to read post-connection, regardless of
 // whether the device advertised them. Used as optionalServices so Web
-// Bluetooth lets us access them after the user picks the device.
+// Bluetooth lets us access them after the user picks the device — Chrome
+// hides any service not listed here, even if the device actually has it
+// (this caused "No Services found in device" for PC-60FW until NUS was
+// added below).
 const ALL_KNOWN_SERVICES = [
   GATT.HEALTH_THERMOMETER_SERVICE, GATT.BLOOD_PRESSURE_SERVICE, GATT.PLX_SERVICE,
-  GATT.ISSC_SERVICE, GATT.HM_SERVICE, GATT.GENERIC_FFF0_SERVICE,
+  GATT.ISSC_SERVICE, GATT.HM_SERVICE, GATT.GENERIC_FFF0_SERVICE, GATT.NUS_SERVICE,
   '0000180a-0000-1000-8000-00805f9b34fb', // Device Information
   '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
 ];
@@ -104,13 +114,63 @@ function parseDet1015bPacket(packet) {
   return { vitalType: 'body_temperature', value: records[0], unit: 'Cel' };
 }
 
+// PC-60FW (Viatom/Creative Medical pulse oximeter) — confirmed via the
+// device's public reverse-engineered Python client (sza2/viatom_pc60fw).
+// Uses the Nordic UART Service. Packet framing:
+//   AA 55 [func] [len] [payload (len bytes, last byte is CRC8/MAXIM)]
+// Within the payload, payload[0] is a packet-type byte; type 0x01 carries
+// the live vitals: payload[1]=SpO2, payload[2]=pulse rate, payload[4]=
+// perfusion index * 10. CRC is not validated here — acceptable for our
+// purposes since a bad packet just fails to reassemble cleanly.
+function makePc60fwReassembler() {
+  let buffer = [];
+
+  return function feed(dataView) {
+    for (let i = 0; i < dataView.byteLength; i++) buffer.push(dataView.getUint8(i));
+
+    const syncIdx = buffer.findIndex((b, i) => b === 0xaa && buffer[i + 1] === 0x55);
+    if (syncIdx === -1) {
+      buffer = [];
+      return null;
+    }
+    if (syncIdx > 0) buffer = buffer.slice(syncIdx);
+    if (buffer.length < 4) return null; // need at least sync(2)+func(1)+len(1)
+
+    const length = buffer[3];
+    const totalLength = 4 + length;
+    if (buffer.length < totalLength) return null;
+
+    const packet = buffer.slice(0, totalLength);
+    buffer = buffer.slice(totalLength);
+    return packet;
+  };
+}
+
+function parsePc60fwPacket(packet) {
+  const payload = packet.slice(4); // drop sync(2)+func(1)+len(1)
+  if (payload[0] !== 0x01) return null; // not a vitals packet
+
+  const spo2 = payload[1];
+  const pulse = payload[2];
+  if (spo2 === 0 || spo2 > 100 || pulse === 0) return null; // no finger inserted / invalid
+
+  return [
+    { vitalType: 'spo2', value: spo2, unit: '%' },
+    { vitalType: 'pulse_rate', value: pulse, unit: '/min' },
+  ];
+}
+
 const VENDOR_PROFILES = {
   det_1015b_thermometer: {
     namePattern: /det.?1015/i,
     serviceUUID: GATT.GENERIC_FFF0_SERVICE,
     charUUID: GATT.GENERIC_FFF0_NOTIFY,
   },
-  // pc_60fw_oximeter:  pending diagnostic capture from real device.
+  pc_60fw_oximeter: {
+    namePattern: /pc.?60f/i,
+    serviceUUID: GATT.NUS_SERVICE,
+    charUUID: GATT.NUS_TX_NOTIFY,
+  },
   // alphamed_u807_bp:  pending diagnostic capture from real device.
 };
 
@@ -325,6 +385,28 @@ async function bindDeviceAndListen(device, type) {
       const packet = reassemble(e.target.value);
       if (!packet) return;
       const result = parseDet1015bPacket(packet);
+      if (result) {
+        dc.onReading(result);
+        setDot(type, 'captured');
+      }
+    });
+
+    await char.startNotifications();
+    return;
+  }
+
+  if (vendor && vendor.key === 'pc_60fw_oximeter') {
+    const service = await server.getPrimaryService(vendor.serviceUUID);
+    const char    = await service.getCharacteristic(vendor.charUUID);
+    const reassemble = makePc60fwReassembler();
+
+    setDot(type, 'connected');
+    setDisplay(type, 'Connected — take a reading');
+
+    char.addEventListener('characteristicvaluechanged', (e) => {
+      const packet = reassemble(e.target.value);
+      if (!packet) return;
+      const result = parsePc60fwPacket(packet);
       if (result) {
         dc.onReading(result);
         setDot(type, 'captured');
