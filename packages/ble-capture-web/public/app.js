@@ -278,31 +278,77 @@ function parsePlxSpotCheck(dataView) {
 
 // ─── App state ────────────────────────────────────────────────────────────────
 
+// `cfg` holds two kinds of things with different lifetimes:
+// - apiBase/apiKey: one-time local install config, persisted in
+//   localStorage via the Settings screen.
+// - patientId/recordedBy: per-visit context that the EMR provides by
+//   opening this page with ?patientId=...&recordedBy=... (its "Start
+//   Vitals" button). Never typed in manually in normal use.
 let cfg = {};
 const pendingReadings = [];    // flat array of reading objects
 const connectedDevices = {};   // type -> BLE device
 
-// ─── Setup ────────────────────────────────────────────────────────────────────
+function readEmrContextFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    patientId: params.get('patientId') || null,
+    recordedBy: params.get('recordedBy') || 'EMR User',
+  };
+}
+
+function loadSavedApiConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('careline_cfg') || '{}');
+    return { apiBase: saved.apiBase || '', apiKey: saved.apiKey || '' };
+  } catch {
+    return { apiBase: '', apiKey: '' };
+  }
+}
+
+function saveApiConfig(apiBase, apiKey) {
+  localStorage.setItem('careline_cfg', JSON.stringify({ apiBase, apiKey }));
+}
+
+// ─── Setup (one-time API config) ───────────────────────────────────────────────
 
 document.getElementById('setup-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  cfg = {
-    apiBase:    fd.get('apiBase').replace(/\/$/, ''),
-    apiKey:     fd.get('apiKey').trim(),
-    patientId:  fd.get('patientId').trim(),
-    recordedBy: fd.get('recordedBy').trim() || 'CareManager',
-  };
-  localStorage.setItem('careline_cfg', JSON.stringify(cfg));
-  showCapture();
+  const apiBase = fd.get('apiBase').trim().replace(/\/$/, '');
+  const apiKey  = fd.get('apiKey').trim();
+  saveApiConfig(apiBase, apiKey);
+  routeToCorrectScreen();
 });
 
+function setActiveScreen(id) {
+  document.querySelectorAll('.screen').forEach((el) => el.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function showSetup() {
+  const saved = loadSavedApiConfig();
+  const f = document.getElementById('setup-form');
+  f.apiBase.value = saved.apiBase || 'http://localhost:3000/api/v1';
+  f.apiKey.value = saved.apiKey || '';
+  setActiveScreen('screen-setup');
+}
+
+function showNoPatientScreen() {
+  setActiveScreen('screen-no-patient');
+}
+
+function useDevTestPatient() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('patientId', 'patient-demo-1');
+  url.searchParams.set('recordedBy', 'Dev Tester');
+  window.location.href = url.toString();
+}
+
 function showCapture() {
-  document.getElementById('screen-setup').classList.remove('active');
-  document.getElementById('screen-capture').classList.add('active');
+  setActiveScreen('screen-capture');
   document.getElementById('capture-subtitle').textContent = `Patient: ${cfg.patientId}`;
   if (!navigator.bluetooth) {
-    document.querySelector('main').insertAdjacentHTML('afterbegin',
+    document.querySelector('#screen-capture main').insertAdjacentHTML('afterbegin',
       `<div class="no-ble-warning">⚠️ Web Bluetooth is not available in this browser.
        Use <strong>Chrome</strong> or <strong>Edge</strong> on Android or Windows.
        Manual entry is still available below.</div>`);
@@ -312,23 +358,25 @@ function showCapture() {
   }
 }
 
-function showSetup() {
-  document.getElementById('screen-capture').classList.remove('active');
-  document.getElementById('screen-setup').classList.add('active');
+// Decides which screen to show on load (or after Settings is saved):
+// missing API config -> Setup; API config present but no patient context
+// from the EMR -> "No patient selected"; both present -> straight to capture.
+function routeToCorrectScreen() {
+  const apiConfig = loadSavedApiConfig();
+  if (!apiConfig.apiBase || !apiConfig.apiKey) {
+    showSetup();
+    return;
+  }
+  const emrContext = readEmrContextFromUrl();
+  if (!emrContext.patientId) {
+    showNoPatientScreen();
+    return;
+  }
+  cfg = { ...apiConfig, ...emrContext };
+  showCapture();
 }
 
-// Restore saved config
-const saved = localStorage.getItem('careline_cfg');
-if (saved) {
-  try {
-    const s = JSON.parse(saved);
-    const f = document.getElementById('setup-form');
-    f.apiBase.value    = s.apiBase    || f.apiBase.value;
-    f.apiKey.value     = s.apiKey     || '';
-    f.patientId.value  = s.patientId  || '';
-    f.recordedBy.value = s.recordedBy || '';
-  } catch {}
-}
+routeToCorrectScreen();
 
 // ─── BLE connect ──────────────────────────────────────────────────────────────
 
@@ -406,7 +454,12 @@ async function bindDeviceAndListen(device, type) {
   device.addEventListener('gattserverdisconnected', device._carelineOnDisconnect);
 
   const vendor = matchVendorProfile(device.name);
-  const server = await device.gatt.connect();
+  // Serialized + time-bounded: if multiple devices try to (re)connect at
+  // the same moment, most BLE stacks (especially on Windows) handle
+  // simultaneous connection attempts poorly and all of them fail. Routing
+  // every connect through one queue, one at a time, fixed this when all
+  // three devices were stuck "waiting to reconnect" simultaneously.
+  const server = await queueBleConnect(() => withTimeout(device.gatt.connect(), 8000, 'GATT connect'));
 
   if (vendor && vendor.key === 'det_1015b_thermometer') {
     const service = await server.getPrimaryService(vendor.serviceUUID);
@@ -496,10 +549,25 @@ async function bindDeviceAndListen(device, type) {
   await char.startNotifications();
 }
 
+// Serializes every device.gatt.connect() call across all panels. When all
+// three devices are simultaneously "waiting to reconnect", firing three
+// connect attempts at once made every one of them fail - the OS Bluetooth
+// stack (notably on Windows) doesn't reliably handle concurrent GATT
+// connection attempts. Routing them through one queue, one at a time,
+// fixes that; each attempt is still individually time-bounded so a slow
+// one can't block the others indefinitely.
+let bleConnectQueueTail = Promise.resolve();
+function queueBleConnect(fn) {
+  const run = bleConnectQueueTail.then(fn, fn);
+  bleConnectQueueTail = run.then(() => {}, () => {});
+  return run;
+}
+
 // Watches for a previously-granted device's advertisement (e.g. when it's
 // powered back on) and reconnects automatically, with no chooser prompt.
 // Requires Chrome's persistent-permissions APIs; silently no-ops elsewhere.
-const reconnectPolls = {}; // type -> interval id, so we don't stack multiple pollers
+const reconnectPolls = {};   // type -> interval id, so we don't stack multiple pollers
+const reconnectInFlight = {}; // type -> true while a poll attempt is in progress
 
 async function watchForReconnect(device, type) {
   if (!device) return;
@@ -534,12 +602,15 @@ async function watchForReconnect(device, type) {
 function startReconnectPolling(device, type) {
   stopReconnectPolling(type);
   reconnectPolls[type] = setInterval(async () => {
-    if (device.gatt.connected) return;
+    if (device.gatt.connected || reconnectInFlight[type]) return;
+    reconnectInFlight[type] = true;
     try {
       await bindDeviceAndListen(device, type);
       stopReconnectPolling(type);
     } catch {
       // Still out of range — keep polling silently.
+    } finally {
+      reconnectInFlight[type] = false;
     }
   }, 3000);
 }
@@ -562,11 +633,16 @@ async function attemptAutoReconnectAll() {
     return;
   }
 
-  for (const type of Object.keys(DEVICE_CONFIG)) {
+  // Fire all panels' reconnect attempts at once rather than one after
+  // another - each bindDeviceAndListen() call queues its actual
+  // gatt.connect() through queueBleConnect(), so they're still tried one
+  // at a time at the radio level, but a slow/failing attempt for one
+  // device no longer delays even *starting* the attempt for the others.
+  await Promise.all(Object.keys(DEVICE_CONFIG).map(async (type) => {
     const rememberedId = getRememberedDeviceId(type);
-    if (!rememberedId) continue;
+    if (!rememberedId) return;
     const device = granted.find((d) => d.id === rememberedId);
-    if (!device) continue;
+    if (!device) return;
 
     setDisplay(type, 'Waiting for device to power on…');
     try {
@@ -575,7 +651,7 @@ async function attemptAutoReconnectAll() {
       // Not in range yet — listen for it to advertise instead of connecting now.
       watchForReconnect(device, type);
     }
-  }
+  }));
 }
 
 async function connectDevice(type) {

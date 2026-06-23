@@ -8,35 +8,55 @@
 </head>
 <body>
 
-  <!-- SETUP SCREEN -->
+  <!-- SETUP SCREEN: one-time local install config only (API base + tenant
+       key). Patient context always comes from the EMR via URL params, not
+       typed in here - see app.js readEmrContextFromUrl(). -->
   <div id="screen-setup" class="screen active">
     <header>
       <h1>CareLine Vitals Bridge</h1>
-      <p class="subtitle">BLE Device Capture</p>
+      <p class="subtitle">Local install setup (one-time)</p>
     </header>
     <main>
       <section class="panel">
-        <h2>Setup</h2>
+        <h2>Connect to the local Vitals Bridge</h2>
+        <p class="hint">
+          This runs once per install. Both the Vitals Bridge and your EMR run
+          on this same machine — the default URL below should normally be
+          left as-is.
+        </p>
         <form id="setup-form">
           <label>
-            Cloud API URL
-            <input type="url" name="apiBase" placeholder="https://your-api.onrender.com/api/v1"
+            Vitals Bridge API URL
+            <input type="url" name="apiBase" placeholder="http://localhost:3000/api/v1"
               value="http://localhost:3000/api/v1" required />
           </label>
           <label>
             Tenant API Key
-            <input type="text" name="apiKey" placeholder="paste your tenant API key" required />
+            <input type="text" name="apiKey" placeholder="paste this site's API key" required />
           </label>
-          <label>
-            Patient ID
-            <input type="text" name="patientId" placeholder="e.g. patient-001" required />
-          </label>
-          <label>
-            Your name (CareManager / Operator)
-            <input type="text" name="recordedBy" placeholder="e.g. Nurse Fatima" />
-          </label>
-          <button type="submit">Start capturing vitals →</button>
+          <button type="submit">Save →</button>
         </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- NO PATIENT CONTEXT SCREEN: shown when the page is opened without a
+       patientId in the URL (i.e. not launched from the EMR's "Start Vitals"
+       button). -->
+  <div id="screen-no-patient" class="screen">
+    <header>
+      <h1>CareLine Vitals Bridge</h1>
+    </header>
+    <main>
+      <section class="panel">
+        <h2>No patient selected</h2>
+        <p class="hint">
+          This page should be opened from the EMR's "Start Vitals" button on
+          a patient's chart, which provides the patient context automatically.
+          Opening it directly isn't supported in normal use.
+        </p>
+        <button class="btn-link" onclick="showSetup()">Settings</button>
+        <button class="btn-manual" onclick="useDevTestPatient()">Use a test patient (dev only)</button>
       </section>
     </main>
   </div>
@@ -46,6 +66,7 @@
     <header>
       <h1>CareLine Vitals Bridge</h1>
       <p class="subtitle" id="capture-subtitle">Patient: —</p>
+      <button class="settings-gear" onclick="showSetup()" title="Settings">⚙</button>
     </header>
     <main>
 
@@ -151,9 +172,6 @@
       </section>
 
     </main>
-    <footer>
-      <button class="btn-link" onclick="showSetup()">← Change settings</button>
-    </footer>
   </div>
 
   <script src="app.js"></script>

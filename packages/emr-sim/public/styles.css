@@ -46,6 +46,27 @@ main {
   font-size: 1.1rem;
 }
 
+.chart-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.chart-header-row h2 { margin: 0; }
+
+.btn-start-vitals {
+  background: #1b5e20;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-start-vitals:hover { background: #154e19; }
+
 .hint {
   font-size: 0.85rem;
   color: #5b6b78;

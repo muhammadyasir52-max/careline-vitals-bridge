@@ -19,8 +19,11 @@
     </section>
 
     <section class="panel">
-      <h2 id="chart-title">Patient chart — vital signs</h2>
-      <p class="hint">Auto-refreshes every 2 seconds. Send readings via the CareLine Vitals Bridge to see them appear here.</p>
+      <div class="chart-header-row">
+        <h2 id="chart-title">Patient chart — vital signs</h2>
+        <button id="btn-start-vitals" class="btn-start-vitals" onclick="startVitals()">Start Vitals</button>
+      </div>
+      <p class="hint">Auto-refreshes every 2 seconds. "Start Vitals" opens the CareLine Vitals Bridge for this patient in a popup.</p>
       <table id="obs-table">
         <thead>
           <tr><th>Recorded</th><th>Vital</th><th>Value</th><th>Source device</th></tr>

@@ -1,60 +1,101 @@
 # CareLine Vitals Bridge
 
-A multi-tenant platform for transmitting vital signs (temperature, blood
-pressure, SpO2/pulse) from patient-facing devices into a hospital's EMR.
-Designed as a sellable product (sold under the CareLine name): each customer
-(tenant) configures their own EMR endpoint (FHIR R4, HL7 v2 over MLLP, or a
-custom REST API) and their own devices, with full data isolation between
-tenants.
+A platform for transmitting vital signs (temperature, blood pressure,
+SpO2/pulse) from Bluetooth devices straight into a hospital's EMR. Sold
+under the CareLine name.
 
-See `../../plans` (or the conversation that produced this repo) for the full
-system design and rationale.
+**Deployment model: local, not cloud.** The Vitals Bridge (`cloud-api` +
+`ble-capture-web`) runs on the same machine as the EMR — a background
+service on the nursing station PC, talking over `localhost`. There's no
+dependency on an internet connection or a hosted service for normal
+operation. (A cloud/Render deployment is still available for remote
+demos — see `render.yaml` — but it is not how this runs in a real
+hospital.)
+
+**Real-world workflow:**
+1. A patient is pulled up on the EMR's demographics screen.
+2. The nurse clicks **"Start Vitals"** — a small popup opens (the
+   `ble-capture-web` app), already knowing which patient this is for
+   (the EMR passes that via the popup's URL — no retyping a patient ID).
+3. The nurse connects each BLE device (or types a value in manually if a
+   device isn't available) — temperature, BP, SpO2/pulse populate live
+   in the popup.
+4. She clicks **"Send to EMR"** — the readings are normalized to FHIR R4
+   Observations and pushed into the EMR, which reflects them immediately.
+
+See `../../plans` (or the conversation that produced this repo) for the
+full system design and rationale.
 
 ## Packages
 
-- **`packages/cloud-api`** — the core multi-tenant ingestion API: validation,
-  normalization to FHIR R4 Observations (LOINC-coded), pluggable EMR
-  adapters (FHIR / HL7v2 / custom REST), retry + dead-letter queue, audit log,
-  and tenant management endpoints.
-- **`packages/admin-portal`** — static web UI for onboarding tenants
-  (configuring their EMR adapter) and viewing per-tenant data-flow dashboards.
-- **`packages/mobile-capture`** — simulator for the device-capture app
-  (BLE + manual entry) that posts sample readings to the ingestion API. The
-  real Expo/React Native app would replace this with live BLE device support.
-- **`packages/edge-agent`** — (not yet implemented) desktop agent for
-  USB/serial-connected ward monitors.
+- **`packages/cloud-api`** — the ingestion API: validation, normalization
+  to FHIR R4 Observations (LOINC-coded), pluggable EMR adapters (FHIR /
+  HL7v2 / custom REST), retry + dead-letter queue, audit log, and tenant
+  management endpoints. (Multi-tenant under the hood, but a real
+  deployment typically configures one tenant per hospital site.)
+- **`packages/ble-capture-web`** — the nurse-facing capture app (Web
+  Bluetooth, runs in Chrome/Edge). Confirmed working against three real
+  devices: **DET-1015B** (infrared thermometer), **PC-60FW** (pulse
+  oximeter), **ALPHAMED U807** (BP monitor) — see `public/app.js` for the
+  reverse-engineered protocols. Always launched with a `patientId` from
+  the EMR; has no manual "type in a patient" flow in normal use.
 - **`packages/emr-sim`** — a lightweight EMR simulator exposing the same
   FHIR R4 REST surface as OpenMRS/Bahmni (`/ws/fhir2/R4/Observation`,
-  `/ws/fhir2/R4/Patient`), plus a patient-chart viewer. Used for demos and
-  local testing without a full OpenMRS install — point the FHIR adapter's
-  `baseUrl` at a real OpenMRS/Bahmni instance later with no code changes.
+  `/ws/fhir2/R4/Patient`), with a patient-chart viewer and a "Start
+  Vitals" button that mimics the real EMR integration. Used for local
+  testing without a real EMR — point the FHIR adapter's `baseUrl` at a
+  real OpenMRS/Bahmni instance later with no code changes.
+- **`packages/admin-portal`** — static web UI for onboarding a tenant
+  (configuring the EMR adapter once during install) and viewing
+  data-flow dashboards.
+- **`packages/mobile-capture`** — a scripted simulator (not the real
+  capture app) for posting sample readings without any hardware; useful
+  for backend testing only.
+- **`packages/edge-agent`** — (not yet implemented) desktop agent for
+  USB/serial-connected ward monitors.
 
-## Running locally (live device → EMR demo)
+## Running locally
+
+**Alongside a real EMR** (production-style — no simulator/admin portal
+needed once a tenant is configured):
 
 ```bash
-# 1. Start the cloud API (default port 3000)
-cd packages/cloud-api
-npm install
-npm start
+# Windows: double-click, or from a terminal:
+start-local.bat
+```
 
-# 2. Start the EMR simulator (default port 6010)
-cd ../emr-sim
-npm install
-npm start
-# open http://localhost:6010 to see the patient chart viewer
+Starts `cloud-api` (port 3000) and `ble-capture-web` (port 7000) as
+background processes. The EMR's "Start Vitals" button should open
+`http://localhost:7000/?patientId=<id>&recordedBy=<name>`.
 
-# 3. Start the admin portal (default port 4000)
-cd ../admin-portal
-npm install
-npm start
+**Full local demo stack** (EMR simulator + admin portal, for testing
+without a real EMR):
+
+```bash
+start-demo.bat
+```
+
+Or run each manually:
+
+```bash
+# 1. Cloud API (port 3000)
+cd packages/cloud-api && npm install && npm start
+
+# 2. EMR Simulator (port 6010)
+cd packages/emr-sim && npm install && npm start
+# open http://localhost:6010
+
+# 3. Admin portal (port 4000) - one-time tenant setup
+cd packages/admin-portal && npm install && npm start
 # open http://localhost:4000, create a tenant with:
 #   EMR adapter type: FHIR R4
 #   FHIR base URL: http://localhost:6010/ws/fhir2/R4
+# copy the generated API key into the BLE capture app's one-time Settings screen
 
-# 4. Simulate a device-capture sync for that tenant
-cd ../mobile-capture
-API_KEY=<apiKey from the admin portal> npm run simulate
-# refresh http://localhost:6010 - the readings appear on the patient chart
+# 4. BLE capture app (port 7000)
+cd packages/ble-capture-web && npm install && npm start
+# open http://localhost:6010, click "Start Vitals" on a patient -
+# it opens the capture app with that patient pre-selected.
 ```
 
 ## Testing

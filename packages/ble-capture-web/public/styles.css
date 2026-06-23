@@ -33,6 +33,21 @@ header {
 header h1 { margin: 0; font-size: 1.2rem; }
 .subtitle { margin: 0.2rem 0 0; opacity: 0.85; font-size: 0.85rem; }
 
+.settings-gear {
+  position: absolute;
+  top: 0.9rem;
+  right: 1rem;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.settings-gear:hover { background: rgba(255,255,255,0.3); }
+
 main {
   max-width: 540px;
   margin: 0 auto;
