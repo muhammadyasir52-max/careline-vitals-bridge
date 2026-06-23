@@ -212,6 +212,8 @@ function showCapture() {
        Use <strong>Chrome</strong> or <strong>Edge</strong> on Android or Windows.
        Manual entry is still available below.</div>`);
     document.querySelectorAll('.btn-ble').forEach(b => b.disabled = true);
+  } else {
+    attemptAutoReconnectAll();
   }
 }
 
@@ -272,9 +274,144 @@ function matchVendorProfile(deviceName) {
   return null;
 }
 
+// Remembers which device id was last granted for each panel, so we can
+// auto-reconnect on future visits without showing the chooser again.
+function rememberDeviceForType(type, deviceId) {
+  try {
+    const map = JSON.parse(localStorage.getItem('careline_ble_devices') || '{}');
+    map[type] = deviceId;
+    localStorage.setItem('careline_ble_devices', JSON.stringify(map));
+  } catch {}
+}
+
+function getRememberedDeviceId(type) {
+  try {
+    const map = JSON.parse(localStorage.getItem('careline_ble_devices') || '{}');
+    return map[type] || null;
+  } catch {
+    return null;
+  }
+}
+
+// Connects to an already-picked BluetoothDevice object and starts listening
+// using the right protocol (vendor-specific or standard GATT). Shared by the
+// manual "Connect" button and the auto-reconnect path.
+async function bindDeviceAndListen(device, type) {
+  const dc = DEVICE_CONFIG[type];
+  connectedDevices[type] = device;
+  rememberDeviceForType(type, device.id);
+
+  device.removeEventListener('gattserverdisconnected', device._carelineOnDisconnect || (() => {}));
+  device._carelineOnDisconnect = () => {
+    setDot(type, 'error');
+    setDisplay(type, 'Disconnected — waiting for device to power back on…');
+    watchForReconnect(device, type);
+  };
+  device.addEventListener('gattserverdisconnected', device._carelineOnDisconnect);
+
+  const vendor = matchVendorProfile(device.name);
+  const server = await device.gatt.connect();
+
+  if (vendor && vendor.key === 'det_1015b_thermometer') {
+    const service = await server.getPrimaryService(vendor.serviceUUID);
+    const char    = await service.getCharacteristic(vendor.charUUID);
+    const reassemble = makeDet1015bReassembler();
+
+    setDot(type, 'connected');
+    setDisplay(type, 'Connected — take a reading');
+
+    char.addEventListener('characteristicvaluechanged', (e) => {
+      const packet = reassemble(e.target.value);
+      if (!packet) return;
+      const result = parseDet1015bPacket(packet);
+      if (result) {
+        dc.onReading(result);
+        setDot(type, 'captured');
+      }
+    });
+
+    await char.startNotifications();
+    return;
+  }
+
+  let service, char;
+  try {
+    service = await server.getPrimaryService(dc.serviceUUID);
+    char    = await service.getCharacteristic(dc.charUUID);
+  } catch (e) {
+    throw new Error(
+      `Connected to "${device.name || 'device'}" but it doesn't expose the standard ` +
+      `profile for ${dc.label}. Use the diagnostic scan below to find its real protocol.`
+    );
+  }
+
+  setDot(type, 'connected');
+  setDisplay(type, 'Connected — take a reading');
+
+  char.addEventListener('characteristicvaluechanged', (e) => {
+    const result = dc.parser(e.target.value);
+    if (result) {
+      dc.onReading(result);
+      setDot(type, 'captured');
+    }
+  });
+
+  await char.startNotifications();
+}
+
+// Watches for a previously-granted device's advertisement (e.g. when it's
+// powered back on) and reconnects automatically, with no chooser prompt.
+// Requires Chrome's persistent-permissions APIs; silently no-ops elsewhere.
+async function watchForReconnect(device, type) {
+  if (!device || typeof device.watchAdvertisements !== 'function') return;
+  setDisplay(type, 'Waiting for device to power on…');
+  try {
+    device.removeEventListener('advertisementreceived', device._carelineOnAdv || (() => {}));
+    device._carelineOnAdv = async () => {
+      try {
+        await bindDeviceAndListen(device, type);
+      } catch (err) {
+        setDot(type, 'error');
+        setDisplay(type, `Error reconnecting: ${err.message}`);
+      }
+    };
+    device.addEventListener('advertisementreceived', device._carelineOnAdv, { once: true });
+    await device.watchAdvertisements();
+  } catch (err) {
+    // Feature not supported on this browser/OS — fall back to manual connect.
+    console.warn('watchAdvertisements unavailable:', err.message);
+  }
+}
+
+// On page load, try to silently reconnect to any device we've previously
+// been granted permission for, without showing the chooser.
+async function attemptAutoReconnectAll() {
+  if (!navigator.bluetooth || typeof navigator.bluetooth.getDevices !== 'function') return;
+  let granted;
+  try {
+    granted = await navigator.bluetooth.getDevices();
+  } catch {
+    return;
+  }
+
+  for (const type of Object.keys(DEVICE_CONFIG)) {
+    const rememberedId = getRememberedDeviceId(type);
+    if (!rememberedId) continue;
+    const device = granted.find((d) => d.id === rememberedId);
+    if (!device) continue;
+
+    setDisplay(type, 'Waiting for device to power on…');
+    try {
+      await bindDeviceAndListen(device, type);
+    } catch {
+      // Not in range yet — listen for it to advertise instead of connecting now.
+      watchForReconnect(device, type);
+    }
+  }
+}
+
 async function connectDevice(type) {
   if (!navigator.bluetooth) return;
-  const dc = DEVICE_CONFIG[type];
   setDot(type, 'connecting');
   setDisplay(type, 'Scanning…');
 
@@ -286,62 +423,7 @@ async function connectDevice(type) {
       acceptAllDevices: true,
       optionalServices: ALL_KNOWN_SERVICES,
     });
-    connectedDevices[type] = device;
-
-    device.addEventListener('gattserverdisconnected', () => {
-      setDot(type, 'error');
-      setDisplay(type, 'Disconnected');
-    });
-
-    const vendor = matchVendorProfile(device.name);
-    const server = await device.gatt.connect();
-
-    if (vendor && vendor.key === 'det_1015b_thermometer') {
-      const service = await server.getPrimaryService(vendor.serviceUUID);
-      const char    = await service.getCharacteristic(vendor.charUUID);
-      const reassemble = makeDet1015bReassembler();
-
-      setDot(type, 'connected');
-      setDisplay(type, 'Connected — take a reading');
-
-      char.addEventListener('characteristicvaluechanged', (e) => {
-        const packet = reassemble(e.target.value);
-        if (!packet) return;
-        const result = parseDet1015bPacket(packet);
-        if (result) {
-          dc.onReading(result);
-          setDot(type, 'captured');
-        }
-      });
-
-      await char.startNotifications();
-      return;
-    }
-
-    let service, char;
-    try {
-      service = await server.getPrimaryService(dc.serviceUUID);
-      char    = await service.getCharacteristic(dc.charUUID);
-    } catch (e) {
-      throw new Error(
-        `Connected to "${device.name || 'device'}" but it doesn't expose the standard ` +
-        `profile for ${dc.label}. Use the diagnostic scan below to find its real protocol.`
-      );
-    }
-
-    setDot(type, 'connected');
-    setDisplay(type, 'Connected — take a reading');
-
-    char.addEventListener('characteristicvaluechanged', (e) => {
-      const result = dc.parser(e.target.value);
-      if (result) {
-        dc.onReading(result);
-        setDot(type, 'captured');
-      }
-    });
-
-    await char.startNotifications();
-
+    await bindDeviceAndListen(device, type);
   } catch (err) {
     setDot(type, 'error');
     setDisplay(type, err.name === 'NotFoundError' ? 'No device selected' : `Error: ${err.message}`);
