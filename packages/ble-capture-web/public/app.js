@@ -41,14 +41,77 @@ const ALL_KNOWN_SERVICES = [
 
 // ─── Vendor-specific profile overrides ───────────────────────────────────────
 // Confirmed devices for this deployment: DET-1015B (thermometer), PC-60FW
-// (oximeter), ALPHAMED U807 (BP monitor). None of these are documented to
-// reliably implement the standard Bluetooth SIG health profiles above — they
-// likely use one of the proprietary UART services. Exact byte parsing is
-// filled in here once confirmed via the diagnostic scan (see diagScan below).
+// (oximeter), ALPHAMED U807 (BP monitor).
+//
+// DET-1015B (Joytech/Sejoy OEM infrared thermometer) — confirmed via live
+// diagnostic capture on 2026-06-23. Uses the generic FFF0/FFF1 "serial over
+// BLE" service, NOT the standard Health Thermometer Service. Protocol:
+//   Every notification is framed as: FA AA AA AF 00 [LEN] [TYPE] ... F5 5F
+//   - LEN = total packet length in bytes (including header+footer)
+//   - TYPE 0x06: idle/heartbeat, no reading (2-byte payload, ignore)
+//   - TYPE 0x03: history dump, payload = up to 16 records of 8 bytes:
+//       byte0: 0x01 (record marker)
+//       byte1-2: temperature in Celsius * 100, big-endian uint16
+//       byte3-7: timestamp fields (exact field order unconfirmed - not used)
+//     Messages over the ~20 byte BLE MTU arrive as multiple notifications;
+//     only the first chunk carries the FA AA AA AF 00 header, continuation
+//     chunks are raw payload bytes with no header of their own.
+//   The device replays its full stored history on every connect rather than
+//   pushing a single "latest" value, so we treat the FIRST record in the
+//   dump as the most recent reading.
+const DET1015B_HEADER = [0xfa, 0xaa, 0xaa, 0xaf, 0x00];
+
+function makeDet1015bReassembler() {
+  let buffer = [];
+  let expectedLength = null;
+
+  return function feed(dataView) {
+    const bytes = [];
+    for (let i = 0; i < dataView.byteLength; i++) bytes.push(dataView.getUint8(i));
+
+    const looksLikeHeader = DET1015B_HEADER.every((b, i) => bytes[i] === b);
+    if (looksLikeHeader) {
+      buffer = bytes;
+      expectedLength = bytes[5];
+    } else if (expectedLength !== null) {
+      buffer = buffer.concat(bytes);
+    } else {
+      return null; // continuation bytes with no preceding header — drop
+    }
+
+    if (expectedLength === null || buffer.length < expectedLength) return null;
+
+    const packet = buffer.slice(0, expectedLength);
+    buffer = [];
+    expectedLength = null;
+    return packet;
+  };
+}
+
+function parseDet1015bPacket(packet) {
+  const type = packet[6];
+  if (type !== 0x03) return null; // 0x06 = heartbeat, nothing to report
+
+  const records = [];
+  let offset = 7;
+  while (offset + 8 <= packet.length - 2) {
+    if (packet[offset] !== 0x01) break;
+    const tempRaw = (packet[offset + 1] << 8) | packet[offset + 2];
+    records.push(tempRaw / 100);
+    offset += 8;
+  }
+  if (records.length === 0) return null;
+  return { vitalType: 'body_temperature', value: records[0], unit: 'Cel' };
+}
+
 const VENDOR_PROFILES = {
-  // det_1015b_thermometer: { serviceUUID: GATT.ISSC_SERVICE, charUUID: GATT.ISSC_NOTIFY, parse: ... },
-  // pc_60fw_oximeter:      { serviceUUID: GATT.GENERIC_FFF0_SERVICE, charUUID: GATT.GENERIC_FFF0_NOTIFY, parse: ... },
-  // alphamed_u807_bp:      { serviceUUID: GATT.ISSC_SERVICE, charUUID: GATT.ISSC_NOTIFY, parse: ... },
+  det_1015b_thermometer: {
+    namePattern: /det.?1015/i,
+    serviceUUID: GATT.GENERIC_FFF0_SERVICE,
+    charUUID: GATT.GENERIC_FFF0_NOTIFY,
+  },
+  // pc_60fw_oximeter:  pending diagnostic capture from real device.
+  // alphamed_u807_bp:  pending diagnostic capture from real device.
 };
 
 // ─── IEEE 11073 float parsing ─────────────────────────────────────────────────
@@ -199,6 +262,16 @@ const DEVICE_CONFIG = {
   },
 };
 
+function matchVendorProfile(deviceName) {
+  if (!deviceName) return null;
+  for (const [key, profile] of Object.entries(VENDOR_PROFILES)) {
+    if (profile.namePattern && profile.namePattern.test(deviceName)) {
+      return { key, ...profile };
+    }
+  }
+  return null;
+}
+
 async function connectDevice(type) {
   if (!navigator.bluetooth) return;
   const dc = DEVICE_CONFIG[type];
@@ -220,7 +293,31 @@ async function connectDevice(type) {
       setDisplay(type, 'Disconnected');
     });
 
-    const server  = await device.gatt.connect();
+    const vendor = matchVendorProfile(device.name);
+    const server = await device.gatt.connect();
+
+    if (vendor && vendor.key === 'det_1015b_thermometer') {
+      const service = await server.getPrimaryService(vendor.serviceUUID);
+      const char    = await service.getCharacteristic(vendor.charUUID);
+      const reassemble = makeDet1015bReassembler();
+
+      setDot(type, 'connected');
+      setDisplay(type, 'Connected — take a reading');
+
+      char.addEventListener('characteristicvaluechanged', (e) => {
+        const packet = reassemble(e.target.value);
+        if (!packet) return;
+        const result = parseDet1015bPacket(packet);
+        if (result) {
+          dc.onReading(result);
+          setDot(type, 'captured');
+        }
+      });
+
+      await char.startNotifications();
+      return;
+    }
+
     let service, char;
     try {
       service = await server.getPrimaryService(dc.serviceUUID);
