@@ -3,6 +3,24 @@ const path = require('path');
 const { spawn } = require('child_process');
 const express = require('express');
 
+// Many real-world deployment machines (Windows Server-class admin/RDP
+// sessions, hospital workstations with minimal GPU drivers) don't have a
+// working GPU-accelerated rendering surface. Without this, Electron can
+// fail to create any window at all with no visible error - which is
+// exactly what happened the first time this ran: no window, no tray icon,
+// no error in the console.
+app.commandLine.appendSwitch('disable-gpu');
+
+// Surface anything that would otherwise fail silently - the first attempt
+// at this app produced zero output and zero visible window, which made it
+// impossible to tell what had gone wrong.
+process.on('uncaughtException', (err) => {
+  console.error('[CareLine Vitals Bridge] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[CareLine Vitals Bridge] Unhandled rejection:', err);
+});
+
 const CLOUD_API_PORT = 3000;
 const BLE_CAPTURE_PORT = 7000;
 const TRIGGER_PORT = 7050;
@@ -63,6 +81,10 @@ function createMainWindow() {
 
   mainWindow.setMenuBarVisibility(false);
 
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[CareLine Vitals Bridge] Window loaded:', mainWindow.webContents.getURL());
+  });
+
   // Keep running in the background instead of quitting when closed.
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
@@ -81,17 +103,31 @@ function createMainWindow() {
   });
 }
 
+// The ble-capture-web server is started as a background child process at
+// the same time as this window is created, so it may not be listening yet
+// the first time we try to load it. Retries with a short delay instead of
+// showing a blank/error page on the very first launch.
+function loadUrlWithRetry(window, url, attemptsLeft = 30) {
+  window.loadURL(url).catch(() => {
+    if (attemptsLeft <= 0) {
+      console.error(`[CareLine Vitals Bridge] Gave up loading ${url} after repeated retries.`);
+      return;
+    }
+    setTimeout(() => loadUrlWithRetry(window, url, attemptsLeft - 1), 300);
+  });
+}
+
 function navigateToVitals(patientId, recordedBy) {
   const url = new URL(`http://localhost:${BLE_CAPTURE_PORT}/`);
   if (patientId) url.searchParams.set('patientId', patientId);
   if (recordedBy) url.searchParams.set('recordedBy', recordedBy);
-  mainWindow.loadURL(url.toString());
+  loadUrlWithRetry(mainWindow, url.toString());
   mainWindow.show();
   mainWindow.focus();
 }
 
 function showDeviceSetupWindow() {
-  mainWindow.loadURL(`http://localhost:${BLE_CAPTURE_PORT}/`);
+  loadUrlWithRetry(mainWindow, `http://localhost:${BLE_CAPTURE_PORT}/`);
   mainWindow.show();
   mainWindow.focus();
   // The capture app's own routing will land on Settings/Device Setup since
@@ -212,10 +248,24 @@ function createTray() {
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
-  startBackend();
-  createMainWindow();
-  createTray();
-  startTriggerServer();
+  console.log('[CareLine Vitals Bridge] App ready, starting...');
+  try {
+    startBackend();
+    console.log('[CareLine Vitals Bridge] Backend processes spawned.');
+    createMainWindow();
+    console.log('[CareLine Vitals Bridge] Main window created.');
+    createTray();
+    console.log('[CareLine Vitals Bridge] Tray icon created.');
+    startTriggerServer();
+    console.log(`[CareLine Vitals Bridge] Trigger server listening on port ${TRIGGER_PORT}.`);
+
+    // Show the window on first launch so there's always a way in - relying
+    // solely on the tray icon (easy to miss, often hidden in the overflow
+    // area) meant the very first run had no discoverable entry point at all.
+    showDeviceSetupWindow();
+  } catch (err) {
+    console.error('[CareLine Vitals Bridge] Startup failed:', err);
+  }
 });
 
 app.on('window-all-closed', (event) => {
