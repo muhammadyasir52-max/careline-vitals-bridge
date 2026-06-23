@@ -300,6 +300,7 @@ async function bindDeviceAndListen(device, type) {
   const dc = DEVICE_CONFIG[type];
   connectedDevices[type] = device;
   rememberDeviceForType(type, device.id);
+  stopReconnectPolling(type);
 
   device.removeEventListener('gattserverdisconnected', device._carelineOnDisconnect || (() => {}));
   device._carelineOnDisconnect = () => {
@@ -362,24 +363,55 @@ async function bindDeviceAndListen(device, type) {
 // Watches for a previously-granted device's advertisement (e.g. when it's
 // powered back on) and reconnects automatically, with no chooser prompt.
 // Requires Chrome's persistent-permissions APIs; silently no-ops elsewhere.
+const reconnectPolls = {}; // type -> interval id, so we don't stack multiple pollers
+
 async function watchForReconnect(device, type) {
-  if (!device || typeof device.watchAdvertisements !== 'function') return;
+  if (!device) return;
   setDisplay(type, 'Waiting for device to power on…');
-  try {
-    device.removeEventListener('advertisementreceived', device._carelineOnAdv || (() => {}));
-    device._carelineOnAdv = async () => {
-      try {
-        await bindDeviceAndListen(device, type);
-      } catch (err) {
-        setDot(type, 'error');
-        setDisplay(type, `Error reconnecting: ${err.message}`);
-      }
-    };
-    device.addEventListener('advertisementreceived', device._carelineOnAdv, { once: true });
-    await device.watchAdvertisements();
-  } catch (err) {
-    // Feature not supported on this browser/OS — fall back to manual connect.
-    console.warn('watchAdvertisements unavailable:', err.message);
+
+  if (typeof device.watchAdvertisements === 'function') {
+    try {
+      device.removeEventListener('advertisementreceived', device._carelineOnAdv || (() => {}));
+      device._carelineOnAdv = async () => {
+        try {
+          await bindDeviceAndListen(device, type);
+        } catch (err) {
+          setDot(type, 'error');
+          setDisplay(type, `Error reconnecting: ${err.message}`);
+        }
+      };
+      device.addEventListener('advertisementreceived', device._carelineOnAdv, { once: true });
+      await device.watchAdvertisements();
+      return; // advertisement watching active — no need for polling fallback
+    } catch (err) {
+      console.warn('watchAdvertisements unavailable, falling back to polling:', err.message);
+    }
+  }
+
+  // Fallback for browsers/platforms without watchAdvertisements support
+  // (notably Windows Chrome, inconsistently). device.gatt.connect() does
+  // not require a user gesture for an already-permitted device, so we can
+  // just retry it periodically until the device is back in range.
+  startReconnectPolling(device, type);
+}
+
+function startReconnectPolling(device, type) {
+  stopReconnectPolling(type);
+  reconnectPolls[type] = setInterval(async () => {
+    if (device.gatt.connected) return;
+    try {
+      await bindDeviceAndListen(device, type);
+      stopReconnectPolling(type);
+    } catch {
+      // Still out of range — keep polling silently.
+    }
+  }, 3000);
+}
+
+function stopReconnectPolling(type) {
+  if (reconnectPolls[type]) {
+    clearInterval(reconnectPolls[type]);
+    delete reconnectPolls[type];
   }
 }
 
