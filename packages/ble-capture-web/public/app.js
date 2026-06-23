@@ -274,6 +274,15 @@ function bytesToHex(dataView) {
   return bytes.join(' ');
 }
 
+let lastDiagDevice = null;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 async function diagScan() {
   const statusEl = document.getElementById('diag-status');
   statusEl.textContent = 'Opening device picker…';
@@ -283,63 +292,111 @@ async function diagScan() {
       acceptAllDevices: true,
       optionalServices: ALL_KNOWN_SERVICES,
     });
-
-    diagLog(`Connecting to "${device.name || '(unnamed device)'}" (id: ${device.id})`);
-    statusEl.textContent = `Connecting to ${device.name || 'device'}…`;
-
-    device.addEventListener('gattserverdisconnected', () => {
-      diagLog('Device disconnected.');
-      statusEl.textContent = 'Disconnected.';
-    });
-
-    const server = await device.gatt.connect();
-    diagLog('Connected. Discovering services…');
-
-    const services = await server.getPrimaryServices();
-    diagLog(`Found ${services.length} service(s).`);
-
-    let subscribedCount = 0;
-
-    for (const service of services) {
-      diagLog(`Service: ${service.uuid}`);
-      let characteristics;
-      try {
-        characteristics = await service.getCharacteristics();
-      } catch (e) {
-        diagLog(`  (could not read characteristics: ${e.message})`);
-        continue;
-      }
-
-      for (const char of characteristics) {
-        const props = Object.entries(char.properties)
-          .filter(([, v]) => v)
-          .map(([k]) => k)
-          .join(', ');
-        diagLog(`  Characteristic: ${char.uuid}  [${props}]`);
-
-        if (char.properties.notify || char.properties.indicate) {
-          try {
-            char.addEventListener('characteristicvaluechanged', (e) => {
-              diagLog(`  DATA from ${char.uuid}: ${bytesToHex(e.target.value)}`);
-            });
-            await char.startNotifications();
-            subscribedCount++;
-            diagLog(`  → subscribed to notifications on ${char.uuid}`);
-          } catch (e) {
-            diagLog(`  → failed to subscribe: ${e.message}`);
-          }
-        }
-      }
-    }
-
-    statusEl.textContent = subscribedCount > 0
-      ? `Connected and listening on ${subscribedCount} channel(s). Now take a reading on the device.`
-      : 'Connected, but found no notify/indicate channels to listen on.';
-
+    lastDiagDevice = device;
+    await diagConnectAndInspect(device);
   } catch (err) {
     statusEl.textContent = err.name === 'NotFoundError' ? 'No device selected.' : `Error: ${err.message}`;
     diagLog(`ERROR: ${err.message}`);
   }
+}
+
+// Reconnects to the same device without reopening the chooser — useful
+// because these cheap OEM devices often need 2-3 connection attempts.
+async function diagRetry() {
+  const statusEl = document.getElementById('diag-status');
+  if (!lastDiagDevice) {
+    statusEl.textContent = 'No previous device to retry — use "Scan & connect any device" first.';
+    return;
+  }
+  await diagConnectAndInspect(lastDiagDevice);
+}
+
+async function diagConnectAndInspect(device) {
+  const statusEl = document.getElementById('diag-status');
+  const MAX_ATTEMPTS = 3;
+
+  diagLog(`Connecting to "${device.name || '(unnamed device)'}" (id: ${device.id})`);
+
+  device.removeEventListener('gattserverdisconnected', diagOnDisconnect);
+  device.addEventListener('gattserverdisconnected', diagOnDisconnect);
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    statusEl.textContent = `Connecting to ${device.name || 'device'}… (attempt ${attempt}/${MAX_ATTEMPTS})`;
+    try {
+      if (device.gatt.connected) {
+        try { device.gatt.disconnect(); } catch {}
+      }
+      const server = await withTimeout(device.gatt.connect(), 10000, 'GATT connect');
+      diagLog(`Connected (attempt ${attempt}). Discovering services…`);
+
+      const services = await withTimeout(server.getPrimaryServices(), 10000, 'Service discovery');
+      diagLog(`Found ${services.length} service(s).`);
+
+      let subscribedCount = 0;
+      for (const service of services) {
+        diagLog(`Service: ${service.uuid}`);
+        let characteristics;
+        try {
+          characteristics = await withTimeout(service.getCharacteristics(), 8000, 'getCharacteristics');
+        } catch (e) {
+          diagLog(`  (could not read characteristics: ${e.message})`);
+          continue;
+        }
+
+        for (const char of characteristics) {
+          const props = Object.entries(char.properties)
+            .filter(([, v]) => v)
+            .map(([k]) => k)
+            .join(', ');
+          diagLog(`  Characteristic: ${char.uuid}  [${props}]`);
+
+          if (char.properties.notify || char.properties.indicate) {
+            try {
+              char.addEventListener('characteristicvaluechanged', (e) => {
+                diagLog(`  DATA from ${char.uuid}: ${bytesToHex(e.target.value)}`);
+              });
+              await char.startNotifications();
+              subscribedCount++;
+              diagLog(`  → subscribed to notifications on ${char.uuid}`);
+            } catch (e) {
+              diagLog(`  → failed to subscribe: ${e.message}`);
+            }
+          }
+
+          // Some devices only start streaming after receiving a "wake up" /
+          // start command. Read-once on readable characteristics in case
+          // the data is exposed as a polled value instead of a notification.
+          if (char.properties.read) {
+            try {
+              const value = await withTimeout(char.readValue(), 4000, 'readValue');
+              diagLog(`  READ ${char.uuid}: ${bytesToHex(value)}`);
+            } catch (e) {
+              diagLog(`  → read failed: ${e.message}`);
+            }
+          }
+        }
+      }
+
+      statusEl.textContent = subscribedCount > 0
+        ? `Connected and listening on ${subscribedCount} channel(s). Now take a reading on the device.`
+        : 'Connected, but found no notify/indicate channels. Try "Reconnect / retry" or take a reading anyway — some devices only expose values once measuring.';
+      return; // success, stop retrying
+
+    } catch (err) {
+      diagLog(`Attempt ${attempt} failed: ${err.message}`);
+      if (attempt === MAX_ATTEMPTS) {
+        statusEl.textContent = `Failed after ${MAX_ATTEMPTS} attempts: ${err.message}. Try "Reconnect / retry", or power-cycle the device and scan again.`;
+      } else {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+  }
+}
+
+function diagOnDisconnect() {
+  diagLog('Device disconnected.');
+  document.getElementById('diag-status').textContent =
+    'Disconnected. Click "Reconnect / retry" to try again without re-scanning.';
 }
 
 function diagClear() {
