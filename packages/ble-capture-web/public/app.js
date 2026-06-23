@@ -160,6 +160,37 @@ function parsePc60fwPacket(packet) {
   ];
 }
 
+// ALPHAMED U807 BP monitor — confirmed via live diagnostic capture on
+// 2026-06-23 (device advertises as "Bluetooth BP"). Uses the same generic
+// FFF0/FFF1 service as DET-1015B, but a completely different framing:
+// every packet is self-contained within a single BLE notification (no
+// reassembly needed - all observed frames are well under the MTU), shaped
+// as: FD FD [type] ...payload... 0D 0A (0x0D 0x0A is a literal CRLF
+// terminator, not a checksum). Observed types:
+//   0xA4: idle/status heartbeat - no reading
+//   0xFB: live cuff pressure during inflate/deflate (payload[1] = current
+//         pressure in mmHg) - a measurement-in-progress, not a final value
+//   0xFC: final result - payload[0]=systolic, payload[1]=diastolic,
+//         payload[2]=pulse rate (all single-byte mmHg/bpm values)
+function parseU807Packet(dataView) {
+  if (dataView.byteLength < 5) return null;
+  if (dataView.getUint8(0) !== 0xfd || dataView.getUint8(1) !== 0xfd) return null;
+
+  const type = dataView.getUint8(2);
+  if (type !== 0xfc) return null; // ignore idle (0xa4) and in-progress pressure (0xfb) packets
+
+  const systolic  = dataView.getUint8(3);
+  const diastolic = dataView.getUint8(4);
+  const pulse     = dataView.getUint8(5);
+  if (systolic === 0 || diastolic === 0) return null;
+
+  return [
+    { vitalType: 'blood_pressure_systolic',  value: systolic,  unit: 'mmHg' },
+    { vitalType: 'blood_pressure_diastolic', value: diastolic, unit: 'mmHg' },
+    { vitalType: 'pulse_rate',               value: pulse,     unit: '/min' },
+  ];
+}
+
 const VENDOR_PROFILES = {
   det_1015b_thermometer: {
     namePattern: /det.?1015/i,
@@ -171,7 +202,11 @@ const VENDOR_PROFILES = {
     serviceUUID: GATT.NUS_SERVICE,
     charUUID: GATT.NUS_TX_NOTIFY,
   },
-  // alphamed_u807_bp:  pending diagnostic capture from real device.
+  alphamed_u807_bp: {
+    namePattern: /bluetooth.?bp|alphamed|u80/i,
+    serviceUUID: GATT.GENERIC_FFF0_SERVICE,
+    charUUID: GATT.GENERIC_FFF0_NOTIFY,
+  },
 };
 
 // ─── IEEE 11073 float parsing ─────────────────────────────────────────────────
@@ -407,6 +442,25 @@ async function bindDeviceAndListen(device, type) {
       const packet = reassemble(e.target.value);
       if (!packet) return;
       const result = parsePc60fwPacket(packet);
+      if (result) {
+        dc.onReading(result);
+        setDot(type, 'captured');
+      }
+    });
+
+    await char.startNotifications();
+    return;
+  }
+
+  if (vendor && vendor.key === 'alphamed_u807_bp') {
+    const service = await server.getPrimaryService(vendor.serviceUUID);
+    const char    = await service.getCharacteristic(vendor.charUUID);
+
+    setDot(type, 'connected');
+    setDisplay(type, 'Connected — take a reading');
+
+    char.addEventListener('characteristicvaluechanged', (e) => {
+      const result = parseU807Packet(e.target.value);
       if (result) {
         dc.onReading(result);
         setDot(type, 'captured');
