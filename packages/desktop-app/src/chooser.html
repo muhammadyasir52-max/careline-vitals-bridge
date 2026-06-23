@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Select Bluetooth device</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0;
+      padding: 1rem;
+      background: #f4f6f8;
+      color: #1b2733;
+    }
+    h2 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+    #list { display: grid; gap: 0.5rem; max-height: 280px; overflow-y: auto; }
+    .device-row {
+      background: #fff;
+      border: 1px solid #dde3e8;
+      border-radius: 6px;
+      padding: 0.6rem 0.8rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .device-row:hover { background: #e8f5e9; border-color: #1b5e20; }
+    .empty { color: #5b6b78; font-size: 0.85rem; padding: 1rem 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <h2>Select a Bluetooth device</h2>
+  <div id="list"><div class="empty">Scanning…</div></div>
+
+  <script>
+    window.chooserBridge.onDeviceList((deviceList) => {
+      const listEl = document.getElementById('list');
+      if (!deviceList || deviceList.length === 0) {
+        listEl.innerHTML = '<div class="empty">Scanning…</div>';
+        return;
+      }
+      listEl.innerHTML = '';
+      for (const device of deviceList) {
+        const row = document.createElement('div');
+        row.className = 'device-row';
+        row.textContent = device.deviceName || '(unnamed device)';
+        row.addEventListener('click', () => window.chooserBridge.selectDevice(device.deviceId));
+        listEl.appendChild(row);
+      }
+    });
+  </script>
+</body>
+</html>

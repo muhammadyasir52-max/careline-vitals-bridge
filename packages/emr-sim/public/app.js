@@ -6,23 +6,35 @@ const VITAL_LABELS = {
   '8867-4': 'Pulse',
 };
 
-// The Vitals Bridge BLE capture app, running locally alongside this EMR.
-// Override with ?bleCaptureUrl=... if it's on a different host/port.
-const BLE_CAPTURE_URL = new URLSearchParams(window.location.search).get('bleCaptureUrl')
-  || window.BLE_CAPTURE_URL
-  || 'http://localhost:7000';
+// The CareLine Vitals Bridge desktop app exposes a local trigger endpoint -
+// no popup, no browser window of its own. The EMR just pings this and the
+// already-running desktop app brings itself to the foreground for the
+// selected patient. Override with ?triggerUrl=... if it's on a different port.
+const TRIGGER_URL = new URLSearchParams(window.location.search).get('triggerUrl')
+  || window.VITALS_BRIDGE_TRIGGER_URL
+  || 'http://localhost:7050';
 
 let activePatientId = null;
 
-// Mimics the EMR's "Start Vitals" button on a patient's chart: opens the
-// Vitals Bridge capture app in a popup with the patient already selected,
-// so the nurse never has to type a patient ID or her own name into it.
-function startVitals() {
+// Mimics the EMR's "Start Vitals" button on a patient's chart: tells the
+// CareLine Vitals Bridge desktop app (already running in the background) to
+// show itself for this patient. The nurse never sees a browser, a popup, or
+// a URL bar - just the app's own window appearing.
+async function startVitals() {
   if (!activePatientId) return;
-  const url = new URL(BLE_CAPTURE_URL);
-  url.searchParams.set('patientId', activePatientId);
-  url.searchParams.set('recordedBy', 'Nurse on duty');
-  window.open(url.toString(), 'careline-vitals-bridge', 'width=420,height=720');
+  const statusEl = document.getElementById('start-vitals-status');
+  try {
+    const url = new URL(`${TRIGGER_URL}/start-vitals`);
+    url.searchParams.set('patientId', activePatientId);
+    url.searchParams.set('recordedBy', 'Nurse on duty');
+    await fetch(url.toString());
+    if (statusEl) statusEl.textContent = '';
+  } catch (err) {
+    if (statusEl) {
+      statusEl.textContent =
+        'Could not reach the CareLine Vitals Bridge app - is it running? (' + err.message + ')';
+    }
+  }
 }
 
 async function loadPatients() {

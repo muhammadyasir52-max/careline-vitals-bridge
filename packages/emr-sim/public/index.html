@@ -23,7 +23,8 @@
         <h2 id="chart-title">Patient chart — vital signs</h2>
         <button id="btn-start-vitals" class="btn-start-vitals" onclick="startVitals()">Start Vitals</button>
       </div>
-      <p class="hint">Auto-refreshes every 2 seconds. "Start Vitals" opens the CareLine Vitals Bridge for this patient in a popup.</p>
+      <p class="hint" id="start-vitals-status"></p>
+      <p class="hint">Auto-refreshes every 2 seconds. "Start Vitals" brings the CareLine Vitals Bridge desktop app to the foreground for this patient - no popup, no browser.</p>
       <table id="obs-table">
         <thead>
           <tr><th>Recorded</th><th>Vital</th><th>Value</th><th>Source device</th></tr>

@@ -1,0 +1,15 @@
+{
+  "name": "@careline/vitals-bridge-desktop",
+  "version": "0.1.0",
+  "description": "CareLine Vitals Bridge desktop app. Native window (no browser chrome), runs the Vitals Bridge backend as a hidden background process, and exposes a local trigger endpoint for the EMR to open it on a given patient - no popup, no Chrome, no address bar.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "electron": "^42.4.1"
+  }
+}

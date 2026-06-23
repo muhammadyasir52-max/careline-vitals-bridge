@@ -4,23 +4,28 @@ A platform for transmitting vital signs (temperature, blood pressure,
 SpO2/pulse) from Bluetooth devices straight into a hospital's EMR. Sold
 under the CareLine name.
 
-**Deployment model: local, not cloud.** The Vitals Bridge (`cloud-api` +
-`ble-capture-web`) runs on the same machine as the EMR — a background
-service on the nursing station PC, talking over `localhost`. There's no
-dependency on an internet connection or a hosted service for normal
-operation. (A cloud/Render deployment is still available for remote
-demos — see `render.yaml` — but it is not how this runs in a real
-hospital.)
+**Deployment model: local desktop app, not cloud, not a browser tab.**
+`packages/desktop-app` is what actually runs at a hospital — a native
+window with no address bar or browser chrome, that silently runs the
+backend in the background and stays in the system tray. IT installs it
+once; nobody else ever opens a terminal or a browser again. (A cloud/Render
+deployment is still available for remote demos — see `render.yaml` — but
+it is not how this runs in a real hospital.)
 
 **Real-world workflow:**
-1. A patient is pulled up on the EMR's demographics screen.
-2. The nurse clicks **"Start Vitals"** — a small popup opens (the
-   `ble-capture-web` app), already knowing which patient this is for
-   (the EMR passes that via the popup's URL — no retyping a patient ID).
-3. The nurse connects each BLE device (or types a value in manually if a
-   device isn't available) — temperature, BP, SpO2/pulse populate live
-   in the popup.
-4. She clicks **"Send to EMR"** — the readings are normalized to FHIR R4
+1. IT installs the desktop app once, configures the API connection, and
+   pairs the three Bluetooth devices (one-time, via the tray icon's "Pair
+   devices…" menu). From this point on, nobody touches the app directly.
+2. A patient is pulled up on the EMR's demographics screen. The nurse
+   clicks **"Start Vitals"**.
+3. The EMR makes a plain background HTTP call to the already-running
+   desktop app (`http://localhost:7050/start-vitals?patientId=...`) — no
+   popup, no browser window. The app brings its own native window to the
+   foreground for that patient.
+4. The paired devices reconnect automatically; temperature, BP, SpO2/pulse
+   populate live as the nurse takes each reading (or she types a value
+   manually if a device isn't available).
+5. She clicks **"Send to EMR"** — the readings are normalized to FHIR R4
    Observations and pushed into the EMR, which reflects them immediately.
 
 See `../../plans` (or the conversation that produced this repo) for the
@@ -28,6 +33,11 @@ full system design and rationale.
 
 ## Packages
 
+- **`packages/desktop-app`** — the actual deployed artifact: an Electron
+  app with no browser chrome that runs `cloud-api` + `ble-capture-web` as
+  hidden background processes, exposes a local trigger HTTP endpoint for
+  the EMR to call (no popup window), and implements its own Bluetooth
+  device picker. See `packages/desktop-app/README.md`.
 - **`packages/cloud-api`** — the ingestion API: validation, normalization
   to FHIR R4 Observations (LOINC-coded), pluggable EMR adapters (FHIR /
   HL7v2 / custom REST), retry + dead-letter queue, audit log, and tenant
@@ -56,20 +66,23 @@ full system design and rationale.
 
 ## Running locally
 
-**Alongside a real EMR** (production-style — no simulator/admin portal
-needed once a tenant is configured):
+**The actual deployment** (production-style):
 
 ```bash
-# Windows: double-click, or from a terminal:
-start-local.bat
+cd packages/desktop-app && npm install
+# Windows: double-click start-desktop-app.bat, or:
+npm start
 ```
 
-Starts `cloud-api` (port 3000) and `ble-capture-web` (port 7000) as
-background processes. The EMR's "Start Vitals" button should open
-`http://localhost:7000/?patientId=<id>&recordedBy=<name>`.
+Runs as a native window + system tray icon. First launch: configure the
+API connection and pair the three devices via the tray menu's "Pair
+devices…". After that, point the real EMR's "Start Vitals" action at
+`http://localhost:7050/start-vitals?patientId=<id>&recordedBy=<name>`
+(a plain HTTP call — no popup window needed).
 
 **Full local demo stack** (EMR simulator + admin portal, for testing
-without a real EMR):
+without a real EMR — runs everything as plain Node processes instead of
+the Electron app, useful when iterating on backend code):
 
 ```bash
 start-demo.bat
@@ -95,7 +108,8 @@ cd packages/admin-portal && npm install && npm start
 # 4. BLE capture app (port 7000)
 cd packages/ble-capture-web && npm install && npm start
 # open http://localhost:6010, click "Start Vitals" on a patient -
-# it opens the capture app with that patient pre-selected.
+# this calls the trigger endpoint (or opens the capture app directly if
+# the desktop app isn't running) with that patient pre-selected.
 ```
 
 ## Testing
