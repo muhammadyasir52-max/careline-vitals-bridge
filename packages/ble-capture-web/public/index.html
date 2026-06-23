@@ -120,6 +120,26 @@
         </div>
       </section>
 
+      <!-- DIAGNOSTIC / RAW BLE SCAN -->
+      <section class="panel" id="panel-diag">
+        <div class="panel-header">
+          <span class="icon">🔧</span>
+          <h2>Diagnostic: connect any BLE device</h2>
+        </div>
+        <p class="hint">
+          If your device didn't show up above, use this to connect to ANY nearby Bluetooth
+          device and watch the raw data it sends. Take a reading on your device while connected,
+          then copy the log below and send it back so the exact protocol can be added.
+        </p>
+        <div class="actions">
+          <button class="btn-ble" onclick="diagScan()">Scan & connect any device</button>
+          <button class="btn-manual" onclick="diagClear()">Clear log</button>
+          <button class="btn-manual" onclick="diagCopy()">Copy log</button>
+        </div>
+        <div id="diag-status" class="hint"></div>
+        <pre id="diag-log"></pre>
+      </section>
+
       <!-- SEND BUTTON -->
       <section class="panel send-panel">
         <div id="readings-summary"></div>

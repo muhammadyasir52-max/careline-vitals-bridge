@@ -12,16 +12,43 @@ const GATT = {
   PLX_SERVICE:                   '00001822-0000-1000-8000-00805f9b34fb',
   PLX_SPOT_CHECK:                '00002a5f-0000-1000-8000-00805f9b34fb',
   PLX_CONTINUOUS:                '00002a5e-0000-1000-8000-00805f9b34fb',
+
+  // Common proprietary "serial-over-BLE" services used by cheap Chinese OEM
+  // medical devices (DET-1015B, PC-60FW, ALPHAMED U807 and similar are
+  // strong candidates for one of these, since each vendor layers its own
+  // binary protocol on top of a generic UART-style transport).
+  ISSC_SERVICE:                  '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+  ISSC_NOTIFY:                   '49535343-1e4d-4bd9-ba61-23c647249616',
+  ISSC_WRITE:                    '49535343-8841-43f4-a8d4-ecbe34729bb3',
+
+  HM_SERVICE:                    '0000ffe0-0000-1000-8000-00805f9b34fb',
+  HM_NOTIFY:                     '0000ffe1-0000-1000-8000-00805f9b34fb',
+
+  GENERIC_FFF0_SERVICE:          '0000fff0-0000-1000-8000-00805f9b34fb',
+  GENERIC_FFF0_NOTIFY:           '0000fff1-0000-1000-8000-00805f9b34fb',
+  GENERIC_FFF0_WRITE:            '0000fff2-0000-1000-8000-00805f9b34fb',
 };
 
+// All service UUIDs we might want to read post-connection, regardless of
+// whether the device advertised them. Used as optionalServices so Web
+// Bluetooth lets us access them after the user picks the device.
+const ALL_KNOWN_SERVICES = [
+  GATT.HEALTH_THERMOMETER_SERVICE, GATT.BLOOD_PRESSURE_SERVICE, GATT.PLX_SERVICE,
+  GATT.ISSC_SERVICE, GATT.HM_SERVICE, GATT.GENERIC_FFF0_SERVICE,
+  '0000180a-0000-1000-8000-00805f9b34fb', // Device Information
+  '0000180f-0000-1000-8000-00805f9b34fb', // Battery Service
+];
+
 // ─── Vendor-specific profile overrides ───────────────────────────────────────
-// Add entries here once the user confirms device brands/models.
-// Format: { serviceUUID, characteristicUUID, parse(dataView) -> reading object }
-// Examples for common brands are stubbed out — uncomment and fill in when confirmed.
+// Confirmed devices for this deployment: DET-1015B (thermometer), PC-60FW
+// (oximeter), ALPHAMED U807 (BP monitor). None of these are documented to
+// reliably implement the standard Bluetooth SIG health profiles above — they
+// likely use one of the proprietary UART services. Exact byte parsing is
+// filled in here once confirmed via the diagnostic scan (see diagScan below).
 const VENDOR_PROFILES = {
-  // omron_bp: { ... },
-  // ihealth_bp: { ... },
-  // beurer_oximeter: { ... },
+  // det_1015b_thermometer: { serviceUUID: GATT.ISSC_SERVICE, charUUID: GATT.ISSC_NOTIFY, parse: ... },
+  // pc_60fw_oximeter:      { serviceUUID: GATT.GENERIC_FFF0_SERVICE, charUUID: GATT.GENERIC_FFF0_NOTIFY, parse: ... },
+  // alphamed_u807_bp:      { serviceUUID: GATT.ISSC_SERVICE, charUUID: GATT.ISSC_NOTIFY, parse: ... },
 };
 
 // ─── IEEE 11073 float parsing ─────────────────────────────────────────────────
@@ -179,9 +206,12 @@ async function connectDevice(type) {
   setDisplay(type, 'Scanning…');
 
   try {
+    // acceptAllDevices (rather than filtering by service) because many cheap
+    // OEM devices don't advertise their GATT service UUID in the scan
+    // response, only after connecting — filtering would hide them entirely.
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [dc.serviceUUID] }],
-      optionalServices: [dc.serviceUUID],
+      acceptAllDevices: true,
+      optionalServices: ALL_KNOWN_SERVICES,
     });
     connectedDevices[type] = device;
 
@@ -191,8 +221,16 @@ async function connectDevice(type) {
     });
 
     const server  = await device.gatt.connect();
-    const service = await server.getPrimaryService(dc.serviceUUID);
-    const char    = await service.getCharacteristic(dc.charUUID);
+    let service, char;
+    try {
+      service = await server.getPrimaryService(dc.serviceUUID);
+      char    = await service.getCharacteristic(dc.charUUID);
+    } catch (e) {
+      throw new Error(
+        `Connected to "${device.name || 'device'}" but it doesn't expose the standard ` +
+        `profile for ${dc.label}. Use the diagnostic scan below to find its real protocol.`
+      );
+    }
 
     setDot(type, 'connected');
     setDisplay(type, 'Connected — take a reading');
@@ -212,6 +250,111 @@ async function connectDevice(type) {
     setDisplay(type, err.name === 'NotFoundError' ? 'No device selected' : `Error: ${err.message}`);
     console.error(err);
   }
+}
+
+// ─── Diagnostic: connect to any device and log raw bytes ─────────────────────
+// Used to capture the real protocol from a device that doesn't match any
+// known profile, so it can be added to VENDOR_PROFILES afterward.
+
+let diagLines = [];
+
+function diagLog(line) {
+  const ts = new Date().toLocaleTimeString();
+  diagLines.push(`[${ts}] ${line}`);
+  const el = document.getElementById('diag-log');
+  el.textContent = diagLines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+function bytesToHex(dataView) {
+  const bytes = [];
+  for (let i = 0; i < dataView.byteLength; i++) {
+    bytes.push(dataView.getUint8(i).toString(16).padStart(2, '0'));
+  }
+  return bytes.join(' ');
+}
+
+async function diagScan() {
+  const statusEl = document.getElementById('diag-status');
+  statusEl.textContent = 'Opening device picker…';
+
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: ALL_KNOWN_SERVICES,
+    });
+
+    diagLog(`Connecting to "${device.name || '(unnamed device)'}" (id: ${device.id})`);
+    statusEl.textContent = `Connecting to ${device.name || 'device'}…`;
+
+    device.addEventListener('gattserverdisconnected', () => {
+      diagLog('Device disconnected.');
+      statusEl.textContent = 'Disconnected.';
+    });
+
+    const server = await device.gatt.connect();
+    diagLog('Connected. Discovering services…');
+
+    const services = await server.getPrimaryServices();
+    diagLog(`Found ${services.length} service(s).`);
+
+    let subscribedCount = 0;
+
+    for (const service of services) {
+      diagLog(`Service: ${service.uuid}`);
+      let characteristics;
+      try {
+        characteristics = await service.getCharacteristics();
+      } catch (e) {
+        diagLog(`  (could not read characteristics: ${e.message})`);
+        continue;
+      }
+
+      for (const char of characteristics) {
+        const props = Object.entries(char.properties)
+          .filter(([, v]) => v)
+          .map(([k]) => k)
+          .join(', ');
+        diagLog(`  Characteristic: ${char.uuid}  [${props}]`);
+
+        if (char.properties.notify || char.properties.indicate) {
+          try {
+            char.addEventListener('characteristicvaluechanged', (e) => {
+              diagLog(`  DATA from ${char.uuid}: ${bytesToHex(e.target.value)}`);
+            });
+            await char.startNotifications();
+            subscribedCount++;
+            diagLog(`  → subscribed to notifications on ${char.uuid}`);
+          } catch (e) {
+            diagLog(`  → failed to subscribe: ${e.message}`);
+          }
+        }
+      }
+    }
+
+    statusEl.textContent = subscribedCount > 0
+      ? `Connected and listening on ${subscribedCount} channel(s). Now take a reading on the device.`
+      : 'Connected, but found no notify/indicate channels to listen on.';
+
+  } catch (err) {
+    statusEl.textContent = err.name === 'NotFoundError' ? 'No device selected.' : `Error: ${err.message}`;
+    diagLog(`ERROR: ${err.message}`);
+  }
+}
+
+function diagClear() {
+  diagLines = [];
+  document.getElementById('diag-log').textContent = '';
+  document.getElementById('diag-status').textContent = '';
+}
+
+function diagCopy() {
+  const text = diagLines.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('diag-status').textContent = 'Log copied to clipboard.';
+  }).catch(() => {
+    document.getElementById('diag-status').textContent = 'Could not copy automatically — select and copy the log text manually.';
+  });
 }
 
 // ─── Manual entry ─────────────────────────────────────────────────────────────
