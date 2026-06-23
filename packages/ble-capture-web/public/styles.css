@@ -251,3 +251,10 @@ footer {
   font-size: 0.88rem;
   margin-bottom: 0.5rem;
 }
+
+/* Device pairing status */
+.pair-status {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0.4rem 0 0.7rem;
+}

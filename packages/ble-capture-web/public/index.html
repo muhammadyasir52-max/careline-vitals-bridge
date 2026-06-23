@@ -34,8 +34,85 @@
             Tenant API Key
             <input type="text" name="apiKey" placeholder="paste this site's API key" required />
           </label>
-          <button type="submit">Save →</button>
+          <button type="submit">Save and pair devices →</button>
         </form>
+      </section>
+    </main>
+  </div>
+
+  <!-- DEVICE SETUP SCREEN: pairing happens here ONCE per device, done by
+       IT/admin staff — never seen by the nurse in normal use. After pairing,
+       every future page load (the EMR's "Start Vitals" popup) silently
+       reconnects using the permission granted here. -->
+  <div id="screen-device-setup" class="screen">
+    <header>
+      <h1>CareLine Vitals Bridge</h1>
+      <p class="subtitle">Pair devices (one-time, admin only)</p>
+    </header>
+    <main>
+      <section class="panel">
+        <p class="hint">
+          Pair each device once. After that, the nurse's "Start Vitals" popup
+          reconnects automatically — she will not see this screen or any
+          "Connect" buttons.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="icon">🌡️</span>
+          <h2>Body Temperature</h2>
+          <span class="status-dot" id="pair-dot-temp"></span>
+        </div>
+        <p class="pair-status" id="pair-status-temp">Not yet paired</p>
+        <button class="btn-ble" onclick="connectDevice('temp')">Pair thermometer</button>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="icon">🩺</span>
+          <h2>Blood Pressure</h2>
+          <span class="status-dot" id="pair-dot-bp"></span>
+        </div>
+        <p class="pair-status" id="pair-status-bp">Not yet paired</p>
+        <button class="btn-ble" onclick="connectDevice('bp')">Pair BP monitor</button>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <span class="icon">💉</span>
+          <h2>SpO2 / Pulse Oximeter</h2>
+          <span class="status-dot" id="pair-dot-spo2"></span>
+        </div>
+        <p class="pair-status" id="pair-status-spo2">Not yet paired</p>
+        <button class="btn-ble" onclick="connectDevice('spo2')">Pair pulse oximeter</button>
+      </section>
+
+      <!-- DIAGNOSTIC / RAW BLE SCAN -->
+      <section class="panel" id="panel-diag">
+        <div class="panel-header">
+          <span class="icon">🔧</span>
+          <h2>Diagnostic: connect any BLE device</h2>
+        </div>
+        <p class="hint">
+          If a device didn't pair above, use this to connect to ANY nearby Bluetooth
+          device and watch the raw data it sends. Take a reading on the device while
+          connected, then copy the log below and send it to support so the protocol
+          can be decoded.
+        </p>
+        <div class="actions">
+          <button class="btn-ble" onclick="diagScan()">Scan & connect any device</button>
+          <button class="btn-manual" onclick="diagRetry()">Reconnect / retry</button>
+          <button class="btn-manual" onclick="diagClear()">Clear log</button>
+          <button class="btn-manual" onclick="diagCopy()">Copy log</button>
+        </div>
+        <div id="diag-status" class="hint"></div>
+        <pre id="diag-log"></pre>
+      </section>
+
+      <section class="panel">
+        <button class="btn-link" onclick="showSetup()">← API connection settings</button>
+        <button class="btn-send" onclick="routeToCorrectScreen()">Done</button>
       </section>
     </main>
   </div>
@@ -55,18 +132,22 @@
           a patient's chart, which provides the patient context automatically.
           Opening it directly isn't supported in normal use.
         </p>
-        <button class="btn-link" onclick="showSetup()">Settings</button>
+        <button class="btn-link" onclick="showSetup()">API settings</button>
+        <button class="btn-link" onclick="showDeviceSetup()">Pair devices</button>
         <button class="btn-manual" onclick="useDevTestPatient()">Use a test patient (dev only)</button>
       </section>
     </main>
   </div>
 
-  <!-- CAPTURE SCREEN -->
+  <!-- CAPTURE SCREEN: what the nurse actually sees, opened by the EMR's
+       "Start Vitals" button with the patient already selected. No pairing
+       UI here — devices reconnect silently on load using the permission
+       granted once in screen-device-setup. -->
   <div id="screen-capture" class="screen">
     <header>
       <h1>CareLine Vitals Bridge</h1>
       <p class="subtitle" id="capture-subtitle">Patient: —</p>
-      <button class="settings-gear" onclick="showSetup()" title="Settings">⚙</button>
+      <button class="settings-gear" onclick="showDeviceSetup()" title="Pair devices">⚙</button>
     </header>
     <main>
 
@@ -79,7 +160,6 @@
         </div>
         <div class="reading-display" id="display-temp">—</div>
         <div class="actions">
-          <button class="btn-ble" onclick="connectDevice('temp')">Connect BLE device</button>
           <button class="btn-manual" onclick="openManual('temp')">Enter manually</button>
         </div>
         <div class="manual-entry" id="manual-temp">
@@ -101,7 +181,6 @@
         </div>
         <div class="reading-display" id="display-bp">—</div>
         <div class="actions">
-          <button class="btn-ble" onclick="connectDevice('bp')">Connect BLE device</button>
           <button class="btn-manual" onclick="openManual('bp')">Enter manually</button>
         </div>
         <div class="manual-entry" id="manual-bp">
@@ -127,7 +206,6 @@
         </div>
         <div class="reading-display" id="display-spo2">—</div>
         <div class="actions">
-          <button class="btn-ble" onclick="connectDevice('spo2')">Connect BLE device</button>
           <button class="btn-manual" onclick="openManual('spo2')">Enter manually</button>
         </div>
         <div class="manual-entry" id="manual-spo2">
@@ -139,27 +217,6 @@
           </label>
           <button onclick="saveManualSpo2()">Save</button>
         </div>
-      </section>
-
-      <!-- DIAGNOSTIC / RAW BLE SCAN -->
-      <section class="panel" id="panel-diag">
-        <div class="panel-header">
-          <span class="icon">🔧</span>
-          <h2>Diagnostic: connect any BLE device</h2>
-        </div>
-        <p class="hint">
-          If your device didn't show up above, use this to connect to ANY nearby Bluetooth
-          device and watch the raw data it sends. Take a reading on your device while connected,
-          then copy the log below and send it back so the exact protocol can be added.
-        </p>
-        <div class="actions">
-          <button class="btn-ble" onclick="diagScan()">Scan & connect any device</button>
-          <button class="btn-manual" onclick="diagRetry()">Reconnect / retry</button>
-          <button class="btn-manual" onclick="diagClear()">Clear log</button>
-          <button class="btn-manual" onclick="diagCopy()">Copy log</button>
-        </div>
-        <div id="diag-status" class="hint"></div>
-        <pre id="diag-log"></pre>
       </section>
 
       <!-- SEND BUTTON -->

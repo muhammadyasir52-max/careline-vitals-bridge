@@ -317,7 +317,8 @@ document.getElementById('setup-form').addEventListener('submit', (e) => {
   const apiBase = fd.get('apiBase').trim().replace(/\/$/, '');
   const apiKey  = fd.get('apiKey').trim();
   saveApiConfig(apiBase, apiKey);
-  routeToCorrectScreen();
+  // First-time onboarding order: configure API, then pair devices.
+  showDeviceSetup();
 });
 
 function setActiveScreen(id) {
@@ -331,6 +332,23 @@ function showSetup() {
   f.apiBase.value = saved.apiBase || 'http://localhost:3000/api/v1';
   f.apiKey.value = saved.apiKey || '';
   setActiveScreen('screen-setup');
+}
+
+// One-time device pairing, done by IT/admin staff - never shown to the
+// nurse in normal use (she only ever sees screen-capture).
+function showDeviceSetup() {
+  setActiveScreen('screen-device-setup');
+  for (const type of Object.keys(DEVICE_CONFIG)) {
+    const statusEl = document.getElementById(`pair-status-${type}`);
+    const dotEl = document.getElementById(`pair-dot-${type}`);
+    if (getRememberedDeviceId(type)) {
+      statusEl.textContent = 'Paired — will reconnect automatically when powered on';
+      dotEl.className = 'status-dot connected';
+    } else {
+      statusEl.textContent = 'Not yet paired';
+      dotEl.className = 'status-dot';
+    }
+  }
 }
 
 function showNoPatientScreen() {
@@ -975,8 +993,16 @@ async function sendReadings() {
 function setDot(type, state) {
   const el = document.getElementById(`dot-${type}`);
   el.className = `status-dot ${state}`;
+  const pairEl = document.getElementById(`pair-dot-${type}`);
+  if (pairEl) pairEl.className = `status-dot ${state}`;
 }
 
 function setDisplay(type, text) {
   document.getElementById(`display-${type}`).textContent = text;
+  // Mirror into the device-setup screen's pairing status, if present, so
+  // the same connectDevice() call used for one-time pairing gives feedback
+  // there too (the capture screen's elements exist but are hidden during
+  // setup, so this is the only visible feedback during pairing).
+  const pairEl = document.getElementById(`pair-status-${type}`);
+  if (pairEl) pairEl.textContent = text;
 }
