@@ -8,6 +8,8 @@ services:
     envVars:
       - key: PORT
         value: 3000
+      - key: HOST
+        value: 0.0.0.0
     healthCheckPath: /health
 
   - type: web
@@ -19,6 +21,8 @@ services:
     envVars:
       - key: ADMIN_PORTAL_PORT
         value: 4000
+      - key: HOST
+        value: 0.0.0.0
 
   - type: web
     name: careline-emr-sim
@@ -29,6 +33,8 @@ services:
     envVars:
       - key: EMR_SIM_PORT
         value: 6010
+      - key: HOST
+        value: 0.0.0.0
 
   - type: web
     name: careline-ble-capture
@@ -39,3 +45,5 @@ services:
     envVars:
       - key: BLE_CAPTURE_PORT
         value: 7000
+      - key: HOST
+        value: 0.0.0.0

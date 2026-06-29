@@ -26,8 +26,13 @@ function createApp() {
 if (require.main === module) {
   const app = createApp();
   const port = process.env.PORT || 3000;
-  app.listen(port, () => {
-    console.log(`CareLine Vitals Bridge cloud-api listening on port ${port}`);
+  // Default to loopback-only: this holds patient vitals data behind a
+  // single shared API key, and in the local desktop deployment it should
+  // never be reachable from other machines on the hospital network. Render
+  // (HOST=0.0.0.0) is the one legitimate exception, for the cloud demo.
+  const host = process.env.HOST || '127.0.0.1';
+  app.listen(port, host, () => {
+    console.log(`CareLine Vitals Bridge cloud-api listening on ${host}:${port}`);
   });
 }
 

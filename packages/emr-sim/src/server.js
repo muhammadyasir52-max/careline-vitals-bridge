@@ -110,10 +110,13 @@ function createApp() {
 if (require.main === module) {
   const app = createApp();
   const port = process.env.PORT || process.env.EMR_SIM_PORT || 6010;
-  app.listen(port, () => {
-    console.log(`CareLine EMR Simulator (FHIR R4) listening on port ${port}`);
-    console.log(`  FHIR base URL: http://localhost:${port}/ws/fhir2/R4`);
-    console.log(`  Chart viewer:  http://localhost:${port}/`);
+  // Loopback-only by default - this is a stand-in for a real EMR holding
+  // patient data, should never be reachable from other machines on the network.
+  const host = process.env.HOST || '127.0.0.1';
+  app.listen(port, host, () => {
+    console.log(`CareLine EMR Simulator (FHIR R4) listening on ${host}:${port}`);
+    console.log(`  FHIR base URL: http://${host}:${port}/ws/fhir2/R4`);
+    console.log(`  Chart viewer:  http://${host}:${port}/`);
   });
 }
 
